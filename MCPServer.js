@@ -6,13 +6,12 @@ import { z } from "zod";
 import http from "http";
 
 // ─── Config ────────────────────────────────────────────────────────────────
-const DY_API_KEY    = process.env.DY_API_KEY    || "";
-const DY_SECTION_ID = process.env.DY_SECTION_ID || "";
+const DY_API_KEY     = process.env.DY_API_KEY     || "";
 const DY_DATA_CENTER = process.env.DY_DATA_CENTER || "dy-api.com"; // dy-api.com = EU, dy-api.eu = US
-const PORT          = parseInt(process.env.PORT  || "3000", 10);
+const DY_SELECTOR    = process.env.DY_SELECTOR    || "Shopping Muse";
+const PORT           = parseInt(process.env.PORT  || "3000", 10);
 
-if (!DY_API_KEY)    console.warn("[warn] DY_API_KEY not set");
-if (!DY_SECTION_ID) console.warn("[warn] DY_SECTION_ID not set");
+if (!DY_API_KEY) console.warn("[warn] DY_API_KEY not set");
 
 // ─── In-memory session store ────────────────────────────────────────────────
 // Maps a sessionKey (e.g. a userId or IP) to DY conversation state.
@@ -37,16 +36,17 @@ function applyResponseCookies(session, cookies = []) {
 }
 
 // ─── DY Shopping Muse call ──────────────────────────────────────────────────
-async function callShoppingMuse({ text, sessionKey, pageUrl, pageReferrer, deviceType }) {
+async function callShoppingMuse({ text, sessionKey, pageUrl, pageReferrer, pageType, locale }) {
   const session = getSession(sessionKey);
 
   const query = { text };
   if (session.chatId) query.chatId = session.chatId;
 
-  // Per DY docs: send {} for new users; pass dyid + dyid_server for returning users
-  const userObj = session.dyid
-    ? { dyid: session.dyid, ...(session.dyid_server ? { dyid_server: session.dyid_server } : {}) }
-    : {};
+  const userObj = {
+    active_consent_accepted: true,
+    ...(session.dyid ? { dyid: session.dyid } : {}),
+    ...(session.dyid_server ? { dyid_server: session.dyid_server } : {}),
+  };
 
   const sessionObj = session.dySession ? { dy: session.dySession } : {};
 
@@ -55,21 +55,14 @@ async function callShoppingMuse({ text, sessionKey, pageUrl, pageReferrer, devic
     session: sessionObj,
     query,
     context: {
-      device: {
-        userAgent: "DY-MCP-Connector/1.0",
-        ip:        "0.0.0.0",
-      },
       page: {
         location: pageUrl || "https://example.com",
         ...(pageReferrer ? { referrer: pageReferrer } : {}),
-        locale:   "en_GB",
-        type:     "OTHER",
-        data:     [],
+        locale:   locale || "en_US",
+        type:     pageType || "HOMEPAGE",
       },
-      channel: deviceType === "mobile" ? "app" : "web",
     },
-    selector: { names: [] },
-    options:  { returnAnalyticsMetadata: false },
+    selector: { name: DY_SELECTOR },
   };
 
   const res = await fetch(`https://${DY_DATA_CENTER}/v2/serve/user/assistant`, {
@@ -173,18 +166,22 @@ server.tool(
     page_referrer: z.string().url().optional().describe(
       "The referrer URL (previous page). Improves DY targeting accuracy."
     ),
-    device_type: z.enum(["desktop", "mobile", "tablet"]).optional().describe(
-      "The user's device type. Defaults to desktop."
+    page_type: z.enum(["HOMEPAGE", "CATEGORY", "PRODUCT", "CART", "OTHER"]).optional().describe(
+      "The type of page the user is on. Defaults to HOMEPAGE."
+    ),
+    locale: z.string().optional().describe(
+      "Locale string e.g. 'en_US', 'en_GB'. Defaults to en_US."
     ),
   },
-  async ({ query, session_key, page_url, page_referrer, device_type }) => {
+  async ({ query, session_key, page_url, page_referrer, page_type, locale }) => {
     try {
       const result = await callShoppingMuse({
         text:         query,
         sessionKey:   session_key || "default",
         pageUrl:      page_url,
         pageReferrer: page_referrer,
-        deviceType:   device_type || "desktop",
+        pageType:     page_type,
+        locale,
       });
 
       return {
