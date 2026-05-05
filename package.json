@@ -1,0 +1,13 @@
+{
+  "name": "dy-shopping-muse-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "MCPServer.js",
+  "scripts": {
+    "start": "node MCPServer.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.22.0"
+  }
+}
